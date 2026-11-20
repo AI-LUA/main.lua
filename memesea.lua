@@ -1,0 +1,1375 @@
+
+--========================================================
+--          MINH KHA HUB | MEME SEA V2 GEN2
+--========================================================
+-- RAYFIELD GEN2
+-- MOBILE SIDEBAR
+-- SMOOTH LERP FLIGHT V2
+-- AUTO LEVEL FARM
+-- NEAREST ENEMY FARM
+-- SELECTED ENEMY FARM
+-- AUTO QUEST
+-- PLAYER TARGET
+-- INFINITE JUMP
+-- THIN SAFETY FLOOR
+-- AUTO STATS
+-- CUSTOM COLOR PICKER
+-- VN / EN
+-- CONFIGURATION SAVE
+-- CLEANUP
+--========================================================
+
+print("[CHAT-GPT] Starting V2 GEN2...")
+
+repeat task.wait() until game:IsLoaded()
+
+--========================================================
+-- SERVICES
+--========================================================
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+
+local Player = Players.LocalPlayer
+local Env = (getgenv and getgenv()) or _G
+
+if Env.MK_V2_CLEANUP then
+    pcall(Env.MK_V2_CLEANUP)
+end
+
+local Running = true
+local Connections = {}
+local Platform
+local Window
+local Rayfield
+
+local function Connect(signal, callback)
+    local connection = signal:Connect(callback)
+    table.insert(Connections, connection)
+    return connection
+end
+
+local function Pick(value)
+    if type(value) == "table" then
+        return value[1]
+    end
+    return value
+end
+
+--========================================================
+-- LANGUAGE
+--========================================================
+
+local Language = "VN"
+
+local function L(vn, en)
+    return Language == "VN" and vn or en
+end
+
+--========================================================
+-- GAME DATA
+--========================================================
+
+local Modules = RS:WaitForChild("ModuleScript")
+local OtherEvent = RS:WaitForChild("OtherEvent")
+
+local Monsters = workspace:WaitForChild("Monster")
+local NPCs = workspace:WaitForChild("NPCs")
+local Location = workspace:WaitForChild("Location")
+
+local QuestNPCs = NPCs:WaitForChild("Quests_Npc")
+local EnemyLocation = Location:WaitForChild("Enemy_Location")
+local QuestLocation = Location:WaitForChild("QuestLocaion")
+
+local QuestSettings = require(Modules:WaitForChild("Quest_Settings"))
+local GameSettings = require(Modules:WaitForChild("Setting"))
+
+local QuestFolder = Player:WaitForChild("QuestFolder")
+local Ability = Player:WaitForChild("Ability")
+local PlayerData = Player:WaitForChild("PlayerData")
+local PlayerLevel = PlayerData:WaitForChild("Level")
+
+--========================================================
+-- SETTINGS
+--========================================================
+
+local Settings = {
+    FlightSpeed = 300,
+    FarmDistance = 9,
+    ToolFarm = "Fight",
+
+    LevelFarm = false,
+    NearestFarm = false,
+    EnemyFarm = false,
+
+    InfJump = false,
+    ThinFloor = true,
+
+    AutoHaki = true,
+    AutoClick = true,
+    BringMobs = false,
+
+    TakeQuest = true,
+
+    AttackPlayer = false,
+    TargetPlayer = "",
+
+    AutoStats = false,
+    StatsPoints = 1
+}
+
+local SelectedEnemy = ""
+
+local SelectedStats = {
+    Power = false,
+    Health = false,
+    Weapon = false,
+    Melee = false
+}
+
+local StatsNames = {
+    Power = "MemePowerLevel",
+    Health = "DefenseLevel",
+    Weapon = "SwordLevel",
+    Melee = "MeleeLevel"
+}
+
+--========================================================
+-- SMOOTH LERP FLIGHT V2
+--========================================================
+
+local FlightState = {
+    Active = false,
+    Target = nil,
+    Speed = 300
+}
+
+local function StopFlight()
+    FlightState.Active = false
+    FlightState.Target = nil
+
+    local char = Player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+
+    if root then
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+end
+
+local function GoTo(target)
+    if not Running or not target then
+        return false
+    end
+
+    local char = Player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+    if not root or not hum or hum.Health <= 0 then
+        StopFlight()
+        return false
+    end
+
+    if typeof(target) ~= "CFrame" then
+        return false
+    end
+
+    FlightState.Active = true
+    FlightState.Target = target
+
+    local distance = (root.Position - target.Position).Magnitude
+
+    if distance <= 1 then
+        root.CFrame = target
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+
+        FlightState.Active = false
+        FlightState.Target = nil
+
+        return true
+    end
+
+    local dt = RunService.Heartbeat:Wait()
+
+    if not Running or not root.Parent then
+        StopFlight()
+        return false
+    end
+
+    local speed = math.clamp(Settings.FlightSpeed, 50, 500)
+
+    FlightState.Speed = speed
+
+    local alpha = math.clamp(
+        (speed * dt) / math.max(distance, 0.01),
+        0,
+        1
+    )
+
+    root.CFrame = root.CFrame:Lerp(target, alpha)
+
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+
+    if alpha >= 1 then
+        FlightState.Active = false
+        FlightState.Target = nil
+    end
+
+    return true
+end
+
+--========================================================
+-- QUEST DATABASE
+--========================================================
+
+local Quests = {}
+local EnemyNames = {}
+local EnemyQuest = {}
+
+for npcName, quest in pairs(QuestSettings) do
+    local npcPosition = QuestLocation:FindFirstChild(npcName)
+    local enemyPosition = EnemyLocation:FindFirstChild(quest.Target)
+
+    if npcPosition and enemyPosition then
+        table.insert(Quests, {
+            NpcName = npcName,
+            Enemy = quest.Target,
+            Level = quest.LevelNeed,
+            RaidBoss = quest.Raid_Boss,
+            SpecialQuest = quest.Special_Quest,
+            QuestPos = npcPosition.CFrame,
+            EnemyPos = enemyPosition.CFrame
+        })
+    end
+end
+
+table.sort(Quests, function(a, b)
+    return a.Level < b.Level
+end)
+
+for _, quest in ipairs(Quests) do
+    if not table.find(EnemyNames, quest.Enemy) then
+        table.insert(EnemyNames, quest.Enemy)
+    end
+
+    EnemyQuest[quest.Enemy] = quest.NpcName
+end
+
+local function GetCurrentQuest()
+    local selected
+
+    for _, quest in ipairs(Quests) do
+        if quest.Level <= PlayerLevel.Value
+            and not quest.RaidBoss
+            and not quest.SpecialQuest then
+
+            selected = quest
+        end
+    end
+
+    return selected
+end
+
+--========================================================
+-- CHARACTER
+--========================================================
+
+local function Character()
+    return Player.Character
+end
+
+local function Root(char)
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function Alive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function GetQuest()
+    for _, quest in ipairs(QuestFolder:GetChildren()) do
+        local target = quest:FindFirstChild("Target")
+
+        if target and target.Value ~= "None" then
+            return quest
+        end
+    end
+end
+
+--========================================================
+-- WEAPON
+--========================================================
+
+local function EquipWeapon()
+    local char = Character()
+    local backpack = Player:FindFirstChild("Backpack")
+
+    if not Alive(char) or not backpack then
+        return
+    end
+
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            if tostring(tool.ToolTip):find(Settings.ToolFarm, 1, true) then
+                pcall(function()
+                    char:FindFirstChildOfClass("Humanoid"):EquipTool(tool)
+                end)
+                return
+            end
+        end
+    end
+end
+
+--========================================================
+-- COMBAT
+--========================================================
+
+local function Attack()
+    if not Running then
+        return
+    end
+
+    if Settings.AutoClick then
+        pcall(function()
+            local VirtualUser = game:GetService("VirtualUser")
+            VirtualUser:CaptureController()
+            VirtualUser:Button1Down(Vector2.new(1e4, 1e4))
+            VirtualUser:Button1Up(Vector2.new(1e4, 1e4))
+        end)
+    end
+
+    local char = Character()
+
+    if Settings.AutoHaki
+        and char
+        and char:FindFirstChild("AuraColor_Folder") then
+
+        local aura = Ability:FindFirstChild("Aura")
+
+        if aura and aura.Value
+            and #char.AuraColor_Folder:GetChildren() == 0 then
+
+            pcall(function()
+                OtherEvent.MainEvents.Ability:InvokeServer("Aura")
+            end)
+        end
+    end
+end
+
+--========================================================
+-- ENEMY
+--========================================================
+
+local function GetEnemy(name)
+    for _, enemy in ipairs(Monsters:GetChildren()) do
+        if (not name or enemy.Name == name) and Alive(enemy) then
+            return enemy
+        end
+    end
+end
+
+local function KillEnemy(name)
+    if not Running then
+        return false
+    end
+
+    local enemy
+
+    if typeof(name) == "Instance" then
+        enemy = name
+    else
+        enemy = GetEnemy(name)
+    end
+
+    if not Alive(enemy) then
+        return false
+    end
+
+    local enemyRoot = Root(enemy) or enemy.PrimaryPart
+
+    if not enemyRoot then
+        return false
+    end
+
+    local offset =
+        CFrame.new(0, Settings.FarmDistance, 0)
+        * CFrame.Angles(math.rad(-90), 0, 0)
+
+    GoTo(enemyRoot.CFrame * offset)
+
+    EquipWeapon()
+    Attack()
+
+    return true
+end
+
+--========================================================
+-- QUEST
+--========================================================
+
+local function TakeQuest(name, target)
+    local npc = QuestNPCs:FindFirstChild(name)
+
+    if not npc then
+        return false
+    end
+
+    local block = npc:FindFirstChild("Block")
+    local prompt = block and block:FindFirstChild("QuestPrompt")
+
+    if not prompt then
+        return false
+    end
+
+    if Player:DistanceFromCharacter(npc.WorldPivot.Position) < 8 then
+        if fireproximityprompt then
+            pcall(function()
+                fireproximityprompt(prompt)
+            end)
+        end
+
+        return true
+    end
+
+    GoTo(target or QuestLocation[name].CFrame)
+
+    return false
+end
+
+local function ClearQuests(ignore)
+    for _, quest in ipairs(QuestFolder:GetChildren()) do
+        local giver = quest:FindFirstChild("QuestGiver")
+        local target = quest:FindFirstChild("Target")
+
+        if giver and target
+            and giver.Value ~= ignore
+            and target.Value ~= "None" then
+
+            pcall(function()
+                OtherEvent.QuestEvents.Quest:FireServer(
+                    "Abandon_Quest",
+                    {QuestSlot = quest.Name}
+                )
+            end)
+        end
+    end
+end
+
+--========================================================
+-- AUTO FARM
+--========================================================
+
+local function LevelFarm()
+    local quest = GetCurrentQuest()
+
+    if not quest then
+        return false
+    end
+
+    local current = GetQuest()
+
+    if current then
+        local giver = current.QuestGiver.Value
+
+        if giver == quest.NpcName then
+            if not KillEnemy(quest.Enemy) then
+                GoTo(quest.EnemyPos)
+            end
+        else
+            if not KillEnemy(current.Target.Value) then
+                local pos = QuestLocation:FindFirstChild(giver)
+
+                if pos then
+                    GoTo(pos.CFrame)
+                end
+            end
+        end
+    else
+        TakeQuest(quest.NpcName, quest.QuestPos)
+    end
+
+    return true
+end
+
+local function SelectedFarm()
+    if SelectedEnemy == "" then
+        return false
+    end
+
+    local npc = EnemyQuest[SelectedEnemy]
+
+    if not npc then
+        return false
+    end
+
+    local current = GetQuest()
+
+    if (current and current.QuestGiver.Value == npc)
+        or not Settings.TakeQuest then
+
+        if not KillEnemy(SelectedEnemy) then
+            local pos = EnemyLocation:FindFirstChild(SelectedEnemy)
+
+            if pos then
+                GoTo(pos.CFrame)
+            end
+        end
+    else
+        ClearQuests(npc)
+        TakeQuest(npc)
+    end
+
+    return true
+end
+
+local function NearestFarm()
+    local enemy = GetEnemy()
+
+    if enemy then
+        return KillEnemy(enemy)
+    end
+
+    return false
+end
+
+--========================================================
+-- PLAYER LIST
+--========================================================
+
+local PlayerNames = {}
+
+local function UpdatePlayers()
+    table.clear(PlayerNames)
+
+    for _, target in ipairs(Players:GetPlayers()) do
+        if target ~= Player then
+            table.insert(PlayerNames, target.Name)
+        end
+    end
+
+    table.sort(PlayerNames)
+end
+
+UpdatePlayers()
+
+Connect(Players.PlayerAdded, UpdatePlayers)
+
+Connect(Players.PlayerRemoving, function(target)
+    if Settings.TargetPlayer == target.Name then
+        Settings.AttackPlayer = false
+        Settings.TargetPlayer = ""
+    end
+
+    UpdatePlayers()
+end)
+
+local function AttackPlayer()
+    local target = Players:FindFirstChild(Settings.TargetPlayer)
+
+    if not target or not Alive(target.Character) then
+        return
+    end
+
+    local root = Root(target.Character)
+
+    if not root then
+        return
+    end
+
+    local offset =
+        CFrame.new(0, Settings.FarmDistance, 0)
+        * CFrame.Angles(math.rad(-90), 0, 0)
+
+    GoTo(root.CFrame * offset)
+    EquipWeapon()
+    Attack()
+end
+
+--========================================================
+-- THIN FLOOR
+--========================================================
+
+local function RemoveFloor()
+    if Platform then
+        Platform:Destroy()
+        Platform = nil
+    end
+end
+
+local function CreateFloor()
+    RemoveFloor()
+
+    Platform = Instance.new("Part")
+    Platform.Name = "MinhKha_ThinFloor"
+    Platform.Size = Vector3.new(8, 0.15, 8)
+    Platform.Anchored = true
+    Platform.CanCollide = true
+    Platform.CanTouch = false
+    Platform.CanQuery = false
+    Platform.Transparency = 0.15
+    Platform.Material = Enum.Material.SmoothPlastic
+    Platform.Parent = workspace
+end
+
+local function GroundY(root)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {
+        Character(),
+        Platform
+    }
+
+    local result = workspace:Raycast(
+        root.Position + Vector3.new(0, 2, 0),
+        Vector3.new(0, -500, 0),
+        params
+    )
+
+    return result and result.Position.Y
+end
+
+Connect(RunService.RenderStepped, function()
+    if not Running then
+        return
+    end
+
+    if not Settings.ThinFloor then
+        RemoveFloor()
+        return
+    end
+
+    local root = Root(Character())
+
+    if not root then
+        return
+    end
+
+    if not Platform then
+        CreateFloor()
+    end
+
+    local y = root.Position.Y - 3.05
+    local ground = GroundY(root)
+
+    if ground then
+        y = math.max(y, ground + 0.075)
+    end
+
+    Platform.CFrame = CFrame.new(
+        root.Position.X,
+        y,
+        root.Position.Z
+    )
+end)
+
+--========================================================
+-- INFINITE JUMP
+--========================================================
+
+Connect(UIS.JumpRequest, function()
+    if not Running or not Settings.InfJump then
+        return
+    end
+
+    local char = Character()
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+    if hum then
+        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+--========================================================
+-- AUTO STATS
+--========================================================
+
+local StatsWorker = false
+
+local function StartStats()
+    if StatsWorker then
+        return
+    end
+
+    StatsWorker = true
+
+    task.spawn(function()
+        while Running and Settings.AutoStats do
+            pcall(function()
+                local points = PlayerData:FindFirstChild("SkillPoint")
+
+                if points and points.Value > 0 then
+                    for stat, enabled in pairs(SelectedStats) do
+                        if not Running or not Settings.AutoStats then
+                            break
+                        end
+
+                        local statName = StatsNames[stat]
+                        local value = PlayerData:FindFirstChild(statName)
+
+                        if enabled and value
+                            and points.Value > 0
+                            and value.Value < GameSettings.Setting.MaxLevel then
+
+                            OtherEvent.MainEvents.StatsFunction:InvokeServer({
+                                Target = statName,
+                                Action = "UpgradeStats",
+                                Amount = math.clamp(
+                                    Settings.StatsPoints,
+                                    1,
+                                    GameSettings.Setting.MaxLevel - value.Value
+                                )
+                            })
+                        end
+                    end
+                end
+            end)
+
+            task.wait(0.5)
+        end
+
+        StatsWorker = false
+    end)
+end
+
+--========================================================
+-- MAIN WORKER
+--========================================================
+
+task.spawn(function()
+    while Running do
+        local success = pcall(function()
+            if Settings.AttackPlayer then
+                AttackPlayer()
+
+            elseif Settings.LevelFarm then
+                LevelFarm()
+
+            elseif Settings.EnemyFarm then
+                SelectedFarm()
+
+            elseif Settings.NearestFarm then
+                NearestFarm()
+
+            else
+                if FlightState.Active then
+                    StopFlight()
+                end
+            end
+        end)
+
+        if not success then
+            task.wait(0.2)
+        else
+            task.wait(0.05)
+        end
+    end
+end)
+
+--========================================================
+-- CLEANUP
+--========================================================
+
+local function Cleanup()
+    if not Running then
+        return
+    end
+
+    Running = false
+
+    for _, connection in ipairs(Connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+
+    table.clear(Connections)
+
+    StopFlight()
+    RemoveFloor()
+
+    Settings.LevelFarm = false
+    Settings.NearestFarm = false
+    Settings.EnemyFarm = false
+    Settings.AttackPlayer = false
+    Settings.AutoStats = false
+
+    if Window then
+        pcall(function()
+            Window:Destroy()
+        end)
+    end
+
+    Env.MK_V2_CLEANUP = nil
+
+    print("[CHAT-GPT] V2 stopped.")
+end
+
+Env.MK_V2_CLEANUP = Cleanup
+
+--========================================================
+-- RAYFIELD GEN2
+--========================================================
+
+local success, result = pcall(function()
+    return loadstring(game:HttpGet(
+        "https://sirius.menu/gen2"
+    ))()
+end)
+
+if not success or not result then
+    Cleanup()
+    warn("[CHAT-GPT] Rayfield Gen2 failed:", result)
+    return
+end
+
+Rayfield = result
+
+--========================================================
+-- DEFAULT THEME
+--========================================================
+
+local Theme = {
+    WindowColor = Color3.fromRGB(12, 16, 14),
+    ShadowColor = Color3.fromRGB(0, 0, 0),
+
+    SurfaceStroke = Color3.fromRGB(50, 80, 60),
+
+    ContentColor = Color3.fromRGB(245, 245, 245),
+    TitlingColor = Color3.fromRGB(255, 255, 255),
+
+    TabColor = Color3.fromRGB(220, 230, 220),
+    TabBackground = Color3.fromRGB(20, 65, 38),
+    TabStroke = Color3.fromRGB(60, 190, 100),
+
+    ElementStroke = Color3.fromRGB(50, 150, 85),
+    ElementGradient = Color3.fromRGB(22, 30, 25),
+
+    AccentColor = Color3.fromRGB(40, 210, 100),
+    AccentStroke = Color3.fromRGB(40, 210, 100),
+
+    SliderBackground = Color3.fromRGB(35, 45, 38),
+    SliderProgress = Color3.fromRGB(40, 210, 100),
+    SliderHandle = Color3.fromRGB(255, 255, 255),
+
+    ToggleTrack = Color3.fromRGB(45, 55, 48),
+    ToggleKnobOff = Color3.fromRGB(180, 180, 180),
+
+    FieldBackground = Color3.fromRGB(25, 32, 27)
+}
+
+--========================================================
+-- WINDOW
+--========================================================
+
+Window = Rayfield:CreateWindow({
+    name = "CHAT-GPT | MEME SEA V1",
+    subtitle = "GEN2 • MOBILE • SMOOTH LERP",
+
+    sidebarLayout = true,
+
+    theme = Theme,
+
+    configuration = {
+        autoSave = true,
+        autoLoad = true,
+        fileName = "CHAT-GPT",
+        customFolder = "CHAT-GPT"
+    }
+})
+
+--========================================================
+-- SIDEBAR
+--========================================================
+
+Window:CreateSection({
+    name = "MAIN MENU"
+})
+
+local Home = Window:CreateTab({
+    name = "Trang Chủ / Home",
+    icon = 6031265976
+})
+
+local Farm = Window:CreateTab({
+    name = "Tự Động Cày",
+    icon = 6031267825
+})
+
+local PlayerTab = Window:CreateTab({
+    name = "Người Chơi",
+    icon = 6031280882
+})
+
+local StatsTab = Window:CreateTab({
+    name = "Chỉ Số",
+    icon = 6031280883
+})
+
+Window:CreateSection({
+    name = "SYSTEM"
+})
+
+local SettingsTab = Window:CreateTab({
+    name = "Cài Đặt",
+    icon = 6031280884
+})
+
+--========================================================
+-- HOME
+--========================================================
+
+Home:CreateSection({
+    name = "MINH KHA HUB"
+})
+
+Home:CreateText({
+    name = "MINH KHA HUB MEME SEA V2",
+    text = "Rayfield Gen2\nMobile Sidebar\nSmooth Lerp Flight V2\nCustom Colors\nVN / EN"
+})
+
+Home:CreateStat({
+    name = "Player Level",
+    value = PlayerLevel.Value
+})
+
+Home:CreateButton({
+    name = "🔄 Refresh Player List",
+    callback = function()
+        UpdatePlayers()
+    end
+})
+
+Home:CreateButton({
+    name = "🛑 Stop All Features",
+    callback = function()
+        Settings.LevelFarm = false
+        Settings.NearestFarm = false
+        Settings.EnemyFarm = false
+        Settings.AttackPlayer = false
+        Settings.AutoStats = false
+
+        StopFlight()
+
+        Rayfield:Notify({
+            title = "MINH KHA HUB",
+            content = "Đã dừng các chức năng tự động!",
+            duration = 3
+        })
+    end
+})
+
+--========================================================
+-- FARM TAB
+--========================================================
+
+Farm:CreateSection({
+    name = "AUTO FARM"
+})
+
+Farm:CreateDropdown({
+    name = "Farm Weapon",
+    options = {"Fight", "Power", "Weapon"},
+    value = "Fight",
+    flag = "FarmWeapon",
+
+    callback = function(value)
+        Settings.ToolFarm = Pick(value) or "Fight"
+    end
+})
+
+Farm:CreateToggle({
+    name = "Auto Level Farm",
+    value = false,
+    flag = "LevelFarm",
+
+    callback = function(value)
+        Settings.LevelFarm = value
+
+        if not value then
+            StopFlight()
+        end
+    end
+})
+
+Farm:CreateToggle({
+    name = "Nearest Enemy Farm",
+    value = false,
+    flag = "NearestFarm",
+
+    callback = function(value)
+        Settings.NearestFarm = value
+
+        if not value then
+            StopFlight()
+        end
+    end
+})
+
+Farm:CreateSection({
+    name = "SELECT ENEMY"
+})
+
+Farm:CreateDropdown({
+    name = "Choose Enemy",
+    options = EnemyNames,
+    value = EnemyNames[1] or "",
+    flag = "SelectedEnemy",
+
+    callback = function(value)
+        SelectedEnemy = Pick(value) or ""
+    end
+})
+
+Farm:CreateToggle({
+    name = "Selected Enemy Farm",
+    value = false,
+    flag = "EnemyFarm",
+
+    callback = function(value)
+        Settings.EnemyFarm = value
+
+        if not value then
+            StopFlight()
+        end
+    end
+})
+
+Farm:CreateToggle({
+    name = "Auto Take Quest",
+    value = true,
+    flag = "TakeQuest",
+
+    callback = function(value)
+        Settings.TakeQuest = value
+    end
+})
+
+--========================================================
+-- PLAYER TAB
+--========================================================
+
+PlayerTab:CreateSection({
+    name = "MOVEMENT"
+})
+
+PlayerTab:CreateToggle({
+    name = "Infinite Jump",
+    value = false,
+    flag = "InfJump",
+
+    callback = function(value)
+        Settings.InfJump = value
+    end
+})
+
+PlayerTab:CreateToggle({
+    name = "Thin Safety Floor",
+    value = true,
+    flag = "ThinFloor",
+
+    callback = function(value)
+        Settings.ThinFloor = value
+
+        if not value then
+            RemoveFloor()
+        end
+    end
+})
+
+PlayerTab:CreateSection({
+    name = "PLAYER TARGET"
+})
+
+local PlayerDropdown = PlayerTab:CreateDropdown({
+    name = "Choose Player",
+    options = PlayerNames,
+    value = PlayerNames[1] or "",
+    flag = "TargetPlayer",
+
+    callback = function(value)
+        Settings.TargetPlayer = Pick(value) or ""
+    end
+})
+
+task.spawn(function()
+    while Running do
+        UpdatePlayers()
+
+        pcall(function()
+            PlayerDropdown:Refresh(PlayerNames)
+        end)
+
+        task.wait(5)
+    end
+end)
+
+PlayerTab:CreateToggle({
+    name = "Approach Player",
+    value = false,
+    flag = "AttackPlayer",
+
+    callback = function(value)
+        Settings.AttackPlayer = value
+
+        if not value then
+            StopFlight()
+        end
+    end
+})
+
+--========================================================
+-- STATS TAB
+--========================================================
+
+StatsTab:CreateSection({
+    name = "AUTO STATS"
+})
+
+StatsTab:CreateSlider({
+    name = "Points Per Upgrade",
+    range = {1, 100},
+    increment = 1,
+    value = 1,
+    flag = "StatsPoints",
+
+    callback = function(value)
+        Settings.StatsPoints = value
+    end
+})
+
+StatsTab:CreateToggle({
+    name = "Auto Upgrade Stats",
+    value = false,
+    flag = "AutoStats",
+
+    callback = function(value)
+        Settings.AutoStats = value
+
+        if value then
+            StartStats()
+        end
+    end
+})
+
+local StatOptions = {
+    {"Power", "Power"},
+    {"Health", "Health / Defense"},
+    {"Weapon", "Sword"},
+    {"Melee", "Melee"}
+}
+
+for _, item in ipairs(StatOptions) do
+    local key = item[1]
+
+    StatsTab:CreateToggle({
+        name = item[2],
+        value = false,
+        flag = "Stat_" .. key,
+
+        callback = function(value)
+            SelectedStats[key] = value
+        end
+    })
+end
+
+--========================================================
+-- SETTINGS TAB
+--========================================================
+
+SettingsTab:CreateSection({
+    name = "LANGUAGE"
+})
+
+SettingsTab:CreateDropdown({
+    name = "Language / Ngôn Ngữ",
+    options = {"VN", "EN"},
+    value = "VN",
+    flag = "Language",
+
+    callback = function(value)
+        Language = Pick(value) or "VN"
+
+        Rayfield:Notify({
+            title = "MINH KHA HUB",
+            content = Language == "VN"
+                and "Đã chọn tiếng Việt"
+                or "English selected",
+            duration = 3
+        })
+    end
+})
+
+SettingsTab:CreateSection({
+    name = "SMOOTH LERP FLIGHT"
+})
+
+SettingsTab:CreateSlider({
+    name = "Flight Speed",
+    range = {50, 500},
+    increment = 10,
+    value = 300,
+    flag = "FlightSpeed",
+
+    callback = function(value)
+        Settings.FlightSpeed = value
+        FlightState.Speed = value
+    end
+})
+
+SettingsTab:CreateSlider({
+    name = "Farm Distance",
+    range = {5, 20},
+    increment = 1,
+    value = 9,
+    flag = "FarmDistance",
+
+    callback = function(value)
+        Settings.FarmDistance = value
+    end
+})
+
+SettingsTab:CreateSection({
+    name = "COMBAT SETTINGS"
+})
+
+SettingsTab:CreateToggle({
+    name = "Auto Haki",
+    value = true,
+    flag = "AutoHaki",
+
+    callback = function(value)
+        Settings.AutoHaki = value
+    end
+})
+
+SettingsTab:CreateToggle({
+    name = "Auto Click",
+    value = true,
+    flag = "AutoClick",
+
+    callback = function(value)
+        Settings.AutoClick = value
+    end
+})
+
+--========================================================
+-- CUSTOM COLOR PICKER
+--========================================================
+
+SettingsTab:CreateSection({
+    name = "🎨 CUSTOM THEME"
+})
+
+SettingsTab:CreateColorPicker({
+    name = "Accent / Button Color",
+    color = Theme.AccentColor,
+    flag = "AccentColor",
+
+    callback = function(color)
+        Theme.AccentColor = color
+        Theme.AccentStroke = color
+        Theme.SliderProgress = color
+        Theme.TabBackground = color
+
+        Window:ChangeTheme({
+            AccentColor = color,
+            AccentStroke = color,
+            SliderProgress = color,
+            TabBackground = color
+        })
+    end
+})
+
+SettingsTab:CreateColorPicker({
+    name = "Border / Outline Color",
+    color = Theme.ElementStroke,
+    flag = "BorderColor",
+
+    callback = function(color)
+        Theme.ElementStroke = color
+        Theme.SurfaceStroke = color
+
+        Window:ChangeTheme({
+            ElementStroke = color,
+            SurfaceStroke = color
+        })
+    end
+})
+
+SettingsTab:CreateColorPicker({
+    name = "Text Color",
+    color = Theme.ContentColor,
+    flag = "TextColor",
+
+    callback = function(color)
+        Theme.ContentColor = color
+        Theme.TitlingColor = color
+
+        Window:ChangeTheme({
+            ContentColor = color,
+            TitlingColor = color
+        })
+    end
+})
+
+SettingsTab:CreateColorPicker({
+    name = "Background Color",
+    color = Theme.WindowColor,
+    flag = "BackgroundColor",
+
+    callback = function(color)
+        Theme.WindowColor = color
+
+        Window:ChangeTheme({
+            WindowColor = color
+        })
+    end
+})
+
+--========================================================
+-- CONFIGURATION
+--========================================================
+
+SettingsTab:CreateSection({
+    name = "CONFIGURATION"
+})
+
+SettingsTab:CreateButton({
+    name = "💾 Save Configuration",
+
+    callback = function()
+        pcall(function()
+            Window:Save()
+        end)
+
+        Rayfield:Notify({
+            title = "CHAT-GPT",
+            content = "Configuration saved!",
+            duration = 3
+        })
+    end
+})
+
+SettingsTab:CreateButton({
+    name = "🛑 UNLOAD HUB",
+
+    callback = function()
+        Cleanup()
+    end
+})
+
+--========================================================
+-- FINISH
+--========================================================
+
+Rayfield:Notify({
+    title = "chatgpt V2 GEN2",
+    content = "Smooth Lerp Flight V2 Loaded!",
+    duration = 5
+})
