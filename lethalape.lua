@@ -468,8 +468,8 @@ else
 
 	function t1.value17()
 		return t5.value1:CreateWindow({
-			name = "Lethal Ape | Update",
-			subtitle = "by fts9999",
+			name = "CHAT GPT| HUB",
+			subtitle = "by AI",
 			sidebarLayout = true
 		})
 	end
