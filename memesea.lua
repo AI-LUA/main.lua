@@ -1,24 +1,3 @@
-
---========================================================
---          MINH KHA HUB | MEME SEA V2 GEN2
---========================================================
--- RAYFIELD GEN2
--- MOBILE SIDEBAR
--- SMOOTH LERP FLIGHT V2
--- AUTO LEVEL FARM
--- NEAREST ENEMY FARM
--- SELECTED ENEMY FARM
--- AUTO QUEST
--- PLAYER TARGET
--- INFINITE JUMP
--- THIN SAFETY FLOOR
--- AUTO STATS
--- CUSTOM COLOR PICKER
--- VN / EN
--- CONFIGURATION SAVE
--- CLEANUP
---========================================================
-
 print("[CHAT-GPT] Starting V2 GEN2...")
 
 repeat task.wait() until game:IsLoaded()
