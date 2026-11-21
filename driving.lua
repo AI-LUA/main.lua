@@ -1,18 +1,16 @@
 --// ============================================================
---// RAYFIELD GEN2 MENU - MONEY FARM + AUTO DELIVERY
---// Đã fix lỗi UI theo chuẩn Rayfield Gen2 mới nhất
+--// RAYFIELD GEN2 MENU - FIX LỖI CREATE TOGGLE
 --// ============================================================
 
 -- 1. Load Rayfield Gen2 (URL chính thức)
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
 
--- 2. Services & Setup
+-- 2. Services
 local Plrs = game:GetService('Players')
 local RunService = game:GetService('RunService')
 local CS = game:GetService('CollectionService')
 local RS = game:GetService('ReplicatedStorage')
 local VU = game:GetService('VirtualUser')
-local HttpService = game:GetService('HttpService')
 
 local plr = Plrs.LocalPlayer
 
@@ -45,7 +43,7 @@ local modulesOk, modulesErr = pcall(function()
     tpGuard = require(RS.Modules.Client.Exploit.VehicleTeleportDetectionController)
 end)
 
--- 4. Auto Delivery Logic
+-- 4. Auto Delivery Logic (giữ nguyên từ script gốc của bạn)
 local AutoDelivery = {
     Enabled = false, Hover = nil, HoverPart = nil,
     CarId = nil, TrailerId = nil, Checked = false,
@@ -352,7 +350,7 @@ local function stopMoneyFarm()
 end
 
 --// ============================================================
---// RAYFIELD GEN2 UI - FIXED CÚ PHÁP CHUẨN
+--// RAYFIELD GEN2 UI - FIXED
 --// ============================================================
 local Window = Rayfield:CreateWindow({
     name = "DE Menu",
@@ -360,16 +358,14 @@ local Window = Rayfield:CreateWindow({
     sidebarLayout = true,
 })
 
---// ---------- TAB MONEY FARM ----------
+--// TAB MONEY FARM (Bỏ icon để tránh lỗi)
 local MoneyTab = Window:CreateTab({
     name = "Money Farm",
-    icon = "dollar-sign", -- Sử dụng string icon của Rayfield Gen2
 })
 
--- Không dùng CreateSection nữa, dùng Toggle trực tiếp
 MoneyTab:CreateToggle({
     name = "Bật Auto Farm Money",
-    currentValue = false,
+    value = false, -- Sử dụng 'value' thay vì 'currentValue'
     callback = function(value)
         MoneyFarm.Enabled = value
         if value then
@@ -383,7 +379,7 @@ MoneyTab:CreateToggle({
 MoneyTab:CreateInput({
     name = "Số tiền mỗi lần",
     placeholder = "100",
-    currentValue = "100",
+    value = "100", -- Sử dụng 'value'
     removeTextAfterFocusLost = false,
     callback = function(text)
         local n = tonumber(text)
@@ -394,19 +390,17 @@ MoneyTab:CreateInput({
 MoneyTab:CreateLabel("⚠️ Cần thay logic farm tiền vào script.")
 MoneyTab:CreateLabel("Tắt toggle sẽ dừng farm ngay lập tức.")
 
---// ---------- TAB AUTO DELIVERY ----------
+--// TAB AUTO DELIVERY (Bỏ icon)
 local DeliveryTab = Window:CreateTab({
     name = "Auto Delivery",
-    icon = "truck", -- Icon string của Rayfield Gen2
 })
 
 if not modulesOk then
     DeliveryTab:CreateLabel("❌ Không load được module Delivery:\n" .. tostring(modulesErr))
 else
-    -- Toggle bật tắt Delivery
     DeliveryTab:CreateToggle({
         name = "Bật Auto Delivery",
-        currentValue = false,
+        value = false,
         callback = function(value)
             AutoDelivery.Enabled = value
             if not value then
@@ -418,7 +412,6 @@ else
         end,
     })
 
-    -- Label trạng thái
     local statusLabel = DeliveryTab:CreateLabel("⏸️ Chưa bật")
 
     task.spawn(function()
@@ -444,7 +437,6 @@ else
     DeliveryTab:CreateLabel("Tự động spawn xe + trailer và teleport.")
 end
 
---// Thông báo
 Rayfield:Notify({
     title = "DE Menu",
     content = "Đã load thành công!",
