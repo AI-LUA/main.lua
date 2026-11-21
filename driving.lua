@@ -1,5 +1,5 @@
 --// ============================================================
---// RAYFIELD GEN2 MENU - FIXED UI & LOGIC
+--// RAYFIELD GEN2 MENU - FIXED AUTO DELIVERY & MONEY FARM
 --// ============================================================
 
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
@@ -25,7 +25,9 @@ plr.Idled:Connect(function()
     end)
 end)
 
--- Delivery Modules
+-- ==========================================
+-- 1. DELIVERY MODULES (Có pcall an toàn)
+-- ==========================================
 local delivery, deliveryUtil, vehicles, vehicleUtil, towablesUtil, towables, towablesData, vehicleData, tpGuard
 local modulesOk, modulesErr = pcall(function()
     delivery = require(RS.Modules.Client.Jobs.Tasks.DeliveryJobTask)
@@ -40,51 +42,16 @@ local modulesOk, modulesErr = pcall(function()
 end)
 
 -- ==========================================
--- 1. LOGIC MONEY FARM (Đã sửa để bật/tắt mượt)
+-- 2. BIẾN TOÀN CỤC CHO AUTO DELIVERY
 -- ==========================================
-local MoneyFarm = {
-    Enabled = false,
-    Amount = 100,
-    Thread = nil
-}
-
-local function startMoneyFarm()
-    if MoneyFarm.Thread then return end
-    MoneyFarm.Thread = task.spawn(function()
-        while MoneyFarm.Enabled do
-            pcall(function()
-                -- ⚠️ THAY LOGIC FARM TIỀN CỦA GAME BẠN VÀO ĐÂY
-                -- Ví dụ: RS.Remotes.ClaimMoney:FireServer(MoneyFarm.Amount)
-                print("Đang farm tiền...", MoneyFarm.Amount) 
-            end)
-            task.wait(0.5) -- Tốc độ farm
-        end
-        MoneyFarm.Thread = nil
-    end)
-end
-
-local function stopMoneyFarm()
-    MoneyFarm.Enabled = false
-    if MoneyFarm.Thread then
-        pcall(function() task.cancel(MoneyFarm.Thread) end)
-        MoneyFarm.Thread = nil
-    end
-end
-
--- ==========================================
--- 2. LOGIC AUTO DELIVERY (Giữ nguyên gốc)
--- ==========================================
-local AutoDelivery = {
-    Enabled = false, Hover = nil, HoverPart = nil,
-    CarId = nil, TrailerId = nil, Checked = false,
-    SpawnAt = nil, TrailerAt = nil, CurTarget = nil, CurLoc = nil, CurPhase = nil,
-    LastTick = nil, LastFire = nil, ProgressAt = nil, LastTp = nil,
-    LastChar = nil, LastState = nil, RetryAt = nil,
-}
+local autoDeliveryEnabled = false
+local hover, hoverPart
+local carId, trailerId, checked, spawnAt, trailerAt
+local curTarget, curLoc, curPhase, lastTick, lastFire, progressAt, lastTp, lastChar, lastState, retryAt
 
 local function clearHover()
-    if AutoDelivery.Hover then pcall(function() AutoDelivery.Hover:Destroy() end) end
-    AutoDelivery.Hover, AutoDelivery.HoverPart = nil, nil
+    if hover then hover:Destroy() end
+    hover, hoverPart = nil, nil
 end
 
 local function getLoc(pos, skipLast, towing)
@@ -102,7 +69,7 @@ local function getLoc(pos, skipLast, towing)
 end
 
 local function setupVehicle(hum, state)
-    if not AutoDelivery.Checked then
+    if not checked then
         local owned = vehicleData.GetOwnedVehicleIds(plr, true)
         local capacity = 0
         for id, v in pairs(towablesUtil.GetEnabledTowables()) do
@@ -110,16 +77,16 @@ local function setupVehicle(hum, state)
                 and towablesData.IsTowableUnlocked(plr, id) then
                 for _, vehicleId in ipairs(owned) do
                     if towablesUtil.CanVehicleTowTowable(vehicleId, id, plr) then
-                        AutoDelivery.CarId, AutoDelivery.TrailerId, capacity = vehicleId, id, v.CargoCapacity
+                        carId, trailerId, capacity = vehicleId, id, v.CargoCapacity
                         break
                     end
                 end
             end
         end
-        AutoDelivery.Checked = true
+        checked = true
     end
 
-    if not AutoDelivery.CarId then
+    if not carId then
         if hum.SeatPart then
             clearHover(); hum.Sit = false; hum.Jump = true; return false
         end
@@ -128,12 +95,12 @@ local function setupVehicle(hum, state)
 
     local model = vehicleUtil.GetPlayerSpawnedVehicle(plr)
     local carType = model and model:FindFirstChild('CarType')
-    if not carType or carType.Value ~= AutoDelivery.CarId then
+    if not carType or carType.Value ~= carId then
         if state and ((state.ItemsCarried or 0) > 0 or state.IsDropping) then return false end
-        if not AutoDelivery.SpawnAt or tick() - AutoDelivery.SpawnAt > 10 then
+        if not spawnAt or tick() - spawnAt > 10 then
             clearHover()
-            AutoDelivery.SpawnAt, AutoDelivery.TrailerAt = tick(), nil
-            RS.Remotes.VehicleEvent:FireServer('Spawn', AutoDelivery.CarId)
+            spawnAt, trailerAt = tick(), nil
+            RS.Remotes.VehicleEvent:FireServer('Spawn', carId)
         end
         return false
     end
@@ -147,12 +114,12 @@ local function setupVehicle(hum, state)
     end
 
     local trailer = towablesUtil.GetAttachedTrailerFromVehicle(model)
-    if not trailer or trailer:GetAttribute('TowableId') ~= AutoDelivery.TrailerId then
+    if not trailer or trailer:GetAttribute('TowableId') ~= trailerId then
         if state and ((state.ItemsCarried or 0) > 0 or state.IsDropping) then return false end
-        if not AutoDelivery.TrailerAt or tick() - AutoDelivery.TrailerAt > 10 then
+        if not trailerAt or tick() - trailerAt > 10 then
             clearHover()
-            AutoDelivery.TrailerAt = tick()
-            local ok, err = towables.AttemptToSpawnTowable(AutoDelivery.TrailerId)
+            trailerAt = tick()
+            local ok, err = towables.AttemptToSpawnTowable(trailerId)
             if not ok then warn('[DE] ' .. tostring(err)) end
         end
         return false
@@ -165,6 +132,7 @@ local function tp(cf)
     if not char then return false end
     local car = vehicleUtil.getPlayerData(plr)
     local chassis = vehicles.getActiveChassisController()
+
     if car and car.Model and car.WeightPart then
         if not car.Model.Parent or not car.WeightPart.Parent then return false end
         local trailer = towablesUtil.GetAttachedTrailerFromVehicle(car.Model)
@@ -179,11 +147,13 @@ local function tp(cf)
         if trailer and trailer.Parent then trailer:PivotTo(cf * offset) end
         car.WeightPart.Anchored = false
         clearHover()
-        AutoDelivery.Hover = Instance.new('BodyVelocity')
-        AutoDelivery.Hover.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-        AutoDelivery.Hover.Velocity = Vector3.zero
-        AutoDelivery.Hover.Parent = car.WeightPart
-        AutoDelivery.HoverPart = car.WeightPart
+
+        hover = Instance.new('BodyVelocity')
+        hover.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        hover.Velocity = Vector3.zero
+        hover.Parent = car.WeightPart
+        hoverPart = car.WeightPart
+
         for _, model in ipairs({car.Model, trailer}) do
             if model then
                 for _, v in ipairs(model:GetDescendants()) do
@@ -201,11 +171,11 @@ local function tp(cf)
         local hrp = char:FindFirstChild('HumanoidRootPart')
         if hrp then
             clearHover()
-            AutoDelivery.Hover = Instance.new('BodyVelocity')
-            AutoDelivery.Hover.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-            AutoDelivery.Hover.Velocity = Vector3.zero
-            AutoDelivery.Hover.Parent = hrp
-            AutoDelivery.HoverPart = hrp
+            hover = Instance.new('BodyVelocity')
+            hover.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+            hover.Velocity = Vector3.zero
+            hover.Parent = hrp
+            hoverPart = hrp
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
         end
@@ -214,17 +184,16 @@ local function tp(cf)
 end
 
 RunService.Heartbeat:Connect(function()
-    if not AutoDelivery.Enabled then return end
+    if not autoDeliveryEnabled then return end
     local char = plr.Character
     local hrp = char and char:FindFirstChild('HumanoidRootPart')
     local hum = char and char:FindFirstChildOfClass('Humanoid')
-    if AutoDelivery.HoverPart and (not AutoDelivery.HoverPart.Parent or not hrp
-        or plr:GetAttribute('JobId') ~= 'Delivery'
-        or (AutoDelivery.HoverPart ~= hrp and (not hum or not hum.SeatPart))) then
+    if hoverPart and (not hoverPart.Parent or not hrp or plr:GetAttribute('JobId') ~= 'Delivery'
+        or (hoverPart ~= hrp and (not hum or not hum.SeatPart))) then
         clearHover()
     end
     if hrp then hrp.Anchored = false end
-    if hum and AutoDelivery.Hover and AutoDelivery.Hover.Parent == hrp then
+    if hum and hover and hover.Parent == hrp then
         hum:ChangeState(Enum.HumanoidStateType.Freefall)
     end
 end)
@@ -235,23 +204,22 @@ RS.Remotes.DeliveryCompleted.OnClientEvent:Connect(function(result)
     end
 end)
 
-local function deliveryStep()
-    if not AutoDelivery.Enabled or not modulesOk then return end
+local function step()
+    if not autoDeliveryEnabled or not modulesOk then return end
     local char = plr.Character
     local hrp = char and char:FindFirstChild('HumanoidRootPart')
     local hum = char and char:FindFirstChildOfClass('Humanoid')
 
-    if char ~= AutoDelivery.LastChar then
+    if char ~= lastChar then
         clearHover()
-        AutoDelivery.CurTarget, AutoDelivery.CurLoc, AutoDelivery.CurPhase = nil, nil, nil
-        AutoDelivery.LastTick, AutoDelivery.LastFire, AutoDelivery.ProgressAt, AutoDelivery.LastTp = nil, nil, nil, nil
-        AutoDelivery.LastState, AutoDelivery.LastChar = nil, char
-        AutoDelivery.SpawnAt, AutoDelivery.TrailerAt, AutoDelivery.RetryAt = nil, nil, nil
+        curTarget, curLoc, curPhase, lastTick, lastFire, progressAt, lastTp, lastState = nil, nil, nil, nil, nil, nil, nil, nil
+        lastChar = char
+        spawnAt, trailerAt, retryAt = nil, nil, nil
     end
 
     if hrp and hum and hum.Health > 0 then
-        if AutoDelivery.RetryAt and tick() < AutoDelivery.RetryAt then return end
-        AutoDelivery.RetryAt = nil
+        if retryAt and tick() < retryAt then return end
+        retryAt = nil
 
         local state = delivery.GetCurrentDeliveryState()
         if not setupVehicle(hum, state) then return end
@@ -259,77 +227,76 @@ local function deliveryStep()
         if plr:GetAttribute('JobId') ~= 'Delivery' then
             RS.Remotes.RequestStartJobSession:FireServer('Delivery', 'deliveryHub', 'HighRisk')
             clearHover()
-            AutoDelivery.CurTarget, AutoDelivery.CurLoc, AutoDelivery.CurPhase = nil, nil, nil
-            AutoDelivery.LastTick, AutoDelivery.LastFire, AutoDelivery.ProgressAt, AutoDelivery.LastTp = nil, nil, nil, nil
-            AutoDelivery.LastState = nil
+            curTarget, curLoc, curPhase, lastTick, lastFire, progressAt, lastTp, lastState = nil, nil, nil, nil, nil, nil, nil, nil
             task.wait(0.5)
         else
             local target, phase
             local remaining = state and state.ExpirationTime and state.ExpirationTime - workspace:GetServerTimeNow()
-            local newRoute = state and (not AutoDelivery.LastState
-                or state.PickupPosition ~= AutoDelivery.LastState.PickupPosition
-                or state.DestinationPosition ~= AutoDelivery.LastState.DestinationPosition
-                or state.DeliveryStartTime ~= AutoDelivery.LastState.DeliveryStartTime)
+            local newRoute = state and (not lastState or state.PickupPosition ~= lastState.PickupPosition
+                or state.DestinationPosition ~= lastState.DestinationPosition
+                or state.DeliveryStartTime ~= lastState.DeliveryStartTime)
             if newRoute then
-                AutoDelivery.CurTarget, AutoDelivery.CurLoc, AutoDelivery.CurPhase, AutoDelivery.LastFire = nil, nil, nil, nil
+                curTarget, curLoc, curPhase, lastFire = nil, nil, nil, nil
             end
-            if not AutoDelivery.ProgressAt or newRoute or (state == nil) ~= (AutoDelivery.LastState == nil)
-                or (state and AutoDelivery.LastState and (state.ItemsCarried ~= AutoDelivery.LastState.ItemsCarried
-                    or state.PackagesRemainingAtPickup ~= AutoDelivery.LastState.PackagesRemainingAtPickup
-                    or state.IsPlanned ~= AutoDelivery.LastState.IsPlanned)) then
-                AutoDelivery.ProgressAt = tick()
+            if not progressAt or newRoute or (state == nil) ~= (lastState == nil)
+                or (state and lastState and (state.ItemsCarried ~= lastState.ItemsCarried
+                    or state.PackagesRemainingAtPickup ~= lastState.PackagesRemainingAtPickup
+                    or state.IsPlanned ~= lastState.IsPlanned)) then
+                progressAt = tick()
             end
-            AutoDelivery.LastState = state
+            lastState = state
+
             if state then
-                AutoDelivery.LastTick = nil
+                lastTick = nil
                 local carried = state.ItemsCarried or 0
                 local cap = state.MaxCapacity or carried
                 local full = carried >= cap
                 local noMore = state.PackagesRemainingAtPickup == 0
-                if state.IsDropping or AutoDelivery.CurPhase == 'drop'
+                if state.IsDropping or curPhase == 'drop'
                     or carried > 0 and (full or noMore or remaining and remaining <= 5) then
                     phase = 'drop'; target = state.DestinationPosition
                 else
                     phase = 'pickup'; target = state.PickupPosition
                 end
             else
-                AutoDelivery.LastTick = AutoDelivery.LastTick or tick()
-                if tick() - AutoDelivery.LastTick > 0.25 then
+                lastTick = lastTick or tick()
+                if tick() - lastTick > 0.25 then
                     local car = vehicleUtil.getPlayerData(plr)
                     local towing = car and towablesUtil.GetAttachedTrailerFromVehicle(car.Model) ~= nil or false
                     local loc = getLoc(hrp.Position, true, towing)
                     phase = 'new'; target = loc and loc.Position
                 end
             end
+
             if target then
                 local pos = target + Vector3.new(0, math.min(3.5, deliveryUtil.GetPickupRadius() / 2), 0)
                 local part = hum.SeatPart or hrp
-                if target ~= AutoDelivery.CurTarget or phase ~= AutoDelivery.CurPhase
-                    or ((part.Position - pos).Magnitude > deliveryUtil.GetPickupRadius() / 2
-                        and tick() - (AutoDelivery.LastTp or 0) > 2) then
-                    if AutoDelivery.CurLoc then RS.Remotes.DeliveryLocationLeft:FireServer(AutoDelivery.CurLoc) end
+                if target ~= curTarget or phase ~= curPhase
+                    or ((part.Position - pos).Magnitude > deliveryUtil.GetPickupRadius() / 2 and tick() - (lastTp or 0) > 2) then
+                    if curLoc then RS.Remotes.DeliveryLocationLeft:FireServer(curLoc) end
                     if not tp(CFrame.new(pos)) then return end
-                    AutoDelivery.CurTarget, AutoDelivery.CurPhase, AutoDelivery.LastTp = target, phase, tick()
-                    AutoDelivery.CurLoc, AutoDelivery.LastFire = nil, nil
+                    curTarget, curPhase, lastTp = target, phase, tick()
+                    curLoc, lastFire = nil, nil
                 end
-                if tick() - (AutoDelivery.LastTp or 0) < 0.5 then return end
+                if tick() - (lastTp or 0) < 0.5 then return end
+
                 local loc = getLoc(target)
                 if loc and (loc.Position - target).Magnitude < 1
                     and (part.Position - loc.Position).Magnitude <= deliveryUtil.GetPickupRadius() then
-                    if loc ~= AutoDelivery.CurLoc then AutoDelivery.ProgressAt = tick() end
+                    if loc ~= curLoc then progressAt = tick() end
                     local timeout = math.max(10, deliveryUtil.GetItemCollectTime(plr) * 3)
                     if phase == 'drop' and remaining then timeout = math.min(timeout, math.max(2, remaining / 2)) end
-                    if loc == AutoDelivery.CurLoc and tick() - AutoDelivery.ProgressAt > timeout then
+                    if loc == curLoc and tick() - progressAt > timeout then
                         RS.Remotes.DeliveryLocationLeft:FireServer(loc)
                         if not tp(CFrame.new(target + Vector3.new(deliveryUtil.GetPickupRadius() + 8, 3.5, 0))) then return end
-                        AutoDelivery.CurTarget, AutoDelivery.CurLoc, AutoDelivery.LastFire = nil, nil, nil
-                        AutoDelivery.ProgressAt, AutoDelivery.RetryAt = tick(), tick() + 0.5
+                        curTarget, curLoc, lastFire = nil, nil, nil
+                        progressAt, retryAt = tick(), tick() + 0.5
                         return
                     end
                     local busy = state and (phase == 'drop' and state.IsDropping or phase ~= 'drop' and state.IsCollecting)
-                    if loc ~= AutoDelivery.CurLoc or not busy and tick() - (AutoDelivery.LastFire or 0) > 2 then
+                    if loc ~= curLoc or not busy and tick() - (lastFire or 0) > 2 then
                         RS.Remotes.DeliveryLocationInteracted:FireServer(loc)
-                        AutoDelivery.CurLoc, AutoDelivery.LastFire = loc, tick()
+                        curLoc, lastFire = loc, tick()
                     end
                 end
             end
@@ -340,12 +307,10 @@ end
 task.spawn(function()
     while true do
         task.wait(0.1)
-        if AutoDelivery.Enabled and modulesOk then
-            local ok, err = pcall(deliveryStep)
+        if autoDeliveryEnabled then
+            local ok, err = pcall(step)
             if not ok then
-                AutoDelivery.CurTarget, AutoDelivery.CurLoc, AutoDelivery.CurPhase = nil, nil, nil
-                AutoDelivery.LastTick, AutoDelivery.LastFire, AutoDelivery.ProgressAt, AutoDelivery.LastTp = nil, nil, nil, nil
-                AutoDelivery.LastState = nil
+                curTarget, curLoc, curPhase, lastTick, lastFire, progressAt, lastTp, lastState = nil, nil, nil, nil, nil, nil, nil, nil
                 clearHover()
                 warn('[DE] ' .. tostring(err))
                 task.wait(1)
@@ -355,7 +320,35 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- 3. UI RAYFIELD GEN2 (Đã sửa lỗi)
+-- 3. LOGIC MONEY FARM
+-- ==========================================
+local MoneyFarm = { Enabled = false, Amount = 100, Thread = nil }
+
+local function startMoneyFarm()
+    if MoneyFarm.Thread then return end
+    MoneyFarm.Thread = task.spawn(function()
+        while MoneyFarm.Enabled do
+            pcall(function()
+                -- ⚠️ THAY LOGIC FARM TIỀN CỦA GAME BẠN VÀO ĐÂY
+                -- Ví dụ: RS.Remotes.ClaimMoney:FireServer(MoneyFarm.Amount)
+                print("Farm tiền...", MoneyFarm.Amount)
+            end)
+            task.wait(0.5)
+        end
+        MoneyFarm.Thread = nil
+    end)
+end
+
+local function stopMoneyFarm()
+    MoneyFarm.Enabled = false
+    if MoneyFarm.Thread then
+        pcall(function() task.cancel(MoneyFarm.Thread) end)
+        MoneyFarm.Thread = nil
+    end
+end
+
+-- ==========================================
+-- 4. RAYFIELD GEN2 UI
 -- ==========================================
 local Window = Rayfield:CreateWindow({
     name = "DE Menu",
@@ -363,34 +356,15 @@ local Window = Rayfield:CreateWindow({
     sidebarLayout = true,
 })
 
-local function toggleMoneyFarm(val)
-    MoneyFarm.Enabled = val
-    if val then
-        startMoneyFarm()
-    else
-        stopMoneyFarm()
-    end
-end
-
-local function toggleAutoDelivery(val)
-    AutoDelivery.Enabled = val
-    if not val then
-        clearHover()
-        AutoDelivery.CurTarget, AutoDelivery.CurLoc, AutoDelivery.CurPhase = nil, nil, nil
-        AutoDelivery.LastTick, AutoDelivery.LastFire, AutoDelivery.ProgressAt, AutoDelivery.LastTp = nil, nil, nil, nil
-        AutoDelivery.LastState = nil
-    end
-end
-
 --// TAB MONEY FARM
 local MoneyTab = Window:CreateTab({ name = "Money Farm" })
 
--- Dùng currentValue vì Rayfield Gen2 yêu cầu tham số này
 MoneyTab:CreateToggle({
     name = "Bật Auto Farm Money",
     currentValue = false,
     callback = function(value)
-        toggleMoneyFarm(value)
+        MoneyFarm.Enabled = value
+        if value then startMoneyFarm() else stopMoneyFarm() end
     end,
 })
 
@@ -408,43 +382,18 @@ MoneyTab:CreateInput({
 --// TAB AUTO DELIVERY
 local DeliveryTab = Window:CreateTab({ name = "Auto Delivery" })
 
-if not modulesOk then
-    -- Không dùng CreateLabel nữa, báo lỗi qua Notify
-    Rayfield:Notify({ title = "Lỗi Module", content = "Không load được module Delivery!", duration = 5 })
-else
-    DeliveryTab:CreateToggle({
-        name = "Bật Auto Delivery",
-        currentValue = false,
-        callback = function(value)
-            toggleAutoDelivery(value)
-        end,
-    })
-    
-    -- Hiển thị trạng thái bằng Label mới (chỉ dùng Label nếu hỗ trợ, hoặc gộp vào Notify)
-    -- Nếu executor của bạn báo lỗi CreateLabel, hãy xóa đoạn dưới đây:
-    --[[
-    local statusLabel = DeliveryTab:CreateLabel("⏸️ Chưa bật")
-    task.spawn(function()
-        while true do
-            task.wait(0.5)
-            if AutoDelivery.Enabled then
-                local state = delivery and delivery.GetCurrentDeliveryState and delivery.GetCurrentDeliveryState()
-                local text = "▶️ Đang chạy"
-                if state then
-                    text = text .. " | Items: " .. tostring(state.ItemsCarried or 0) .. "/" .. tostring(state.MaxCapacity or "?")
-                    if state.IsDropping then text = text .. " | Đang giao..."
-                    elseif state.IsCollecting then text = text .. " | Đang thu thập..." end
-                else
-                    text = text .. " | Đang tìm route..."
-                end
-                statusLabel:Set(text)
-            else
-                statusLabel:Set("⏸️ Chưa bật")
-            end
+DeliveryTab:CreateToggle({
+    name = "Bật Auto Delivery",
+    currentValue = false,
+    callback = function(value)
+        autoDeliveryEnabled = value
+        if not value then
+            -- Tắt: dừng toàn bộ và clear
+            clearHover()
+            curTarget, curLoc, curPhase, lastTick, lastFire, progressAt, lastTp, lastState = nil, nil, nil, nil, nil, nil, nil, nil
         end
-    end)
-    ]]
-end
+    end,
+})
 
 Rayfield:Notify({
     title = "DE Menu",
